@@ -5,7 +5,7 @@ import { deleteDocumentAction, uploadDocumentAction, type DocumentActionState } 
 
 const inputClass = "mt-1.5 h-10 w-full rounded-md border border-[#394039] bg-[#151815] px-3 text-sm text-[#f0f2ed] focus:border-[#a8bd64] focus:outline-none";
 
-export function DocumentUploadForm({ bikeId, today }: { bikeId: string; today: string }) {
+export function DocumentUploadForm({ bikeId, today, services }: { bikeId: string; today: string; services: { id: string; service_date: string; workshop: string | null }[] }) {
   const [state, action, pending] = useActionState<DocumentActionState, FormData>(uploadDocumentAction, {});
   return <form action={action} encType="multipart/form-data" className="rounded-md border border-[#303630] bg-[#191c19] p-4 sm:p-5">
     <input type="hidden" name="bikeId" value={bikeId} />
@@ -14,6 +14,7 @@ export function DocumentUploadForm({ bikeId, today }: { bikeId: string; today: s
       <label className="text-xs text-[#c7ccc5]">Title<input required name="title" maxLength={120} className={inputClass} /></label>
       <label className="text-xs text-[#c7ccc5]">Type<select name="documentType" defaultValue="registration" className={inputClass}><option value="registration">Registration certificate</option><option value="insurance">Insurance</option><option value="puc">PUC certificate</option><option value="invoice">Service invoice</option><option value="warranty">Warranty</option><option value="receipt">Parts receipt</option><option value="other">Other</option></select></label>
       <label className="text-xs text-[#c7ccc5]">Expiry date <span className="text-[#7f877e]">(insurance / PUC)</span><input type="date" name="expiryDate" min={today} className={inputClass} /></label>
+      <label className="text-xs text-[#c7ccc5]">Link to service <span className="text-[#7f877e]">(optional)</span><select name="serviceRecordId" defaultValue="" className={inputClass}><option value="">No service link</option>{services.map((service) => <option key={service.id} value={service.id}>{service.service_date} · {service.workshop || "Service visit"}</option>)}</select></label>
       <label className="text-xs text-[#c7ccc5]">Choose file<input required type="file" name="file" accept="application/pdf,image/jpeg,image/png,image/webp" className="mt-1.5 block min-h-10 w-full rounded-md border border-[#394039] bg-[#151815] px-2 py-2 text-xs file:mr-3 file:rounded-sm file:border-0 file:bg-[#252b22] file:px-2 file:py-1 file:text-xs file:text-[#d8fa56]" /></label>
     </div>
     <div className="mt-4 flex flex-col gap-3 border-t border-[#303630] pt-4"><p role="status" className={`min-h-4 text-xs ${state.error ? "text-[#ff958b]" : "text-[#d8fa56]"}`}>{state.error ?? state.success ?? ""}</p><button disabled={pending} className="h-10 w-fit rounded-md bg-[#d8fa56] px-4 text-xs font-semibold text-[#151811] disabled:opacity-60">{pending ? "Uploading…" : "Upload document"}</button></div>

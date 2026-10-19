@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { hasSupabaseConfiguration } from "@/lib/env";
+import { consumeUserActionLimit } from "@/lib/security/rate-limit";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const documentSchema = z.object({
@@ -11,11 +12,21 @@ const documentSchema = z.object({
   documentType: z.enum(["registration", "insurance", "puc", "invoice", "warranty", "receipt", "other"]),
   title: z.string().trim().min(1).max(120),
   expiryDate: z.string().optional().transform((value) => value || null),
+  serviceRecordId: z.string().optional().transform((value) => value || null),
 });
 
 const allowedTypes = new Set(["application/pdf", "image/jpeg", "image/png", "image/webp"]);
 const maxSize = 20 * 1024 * 1024;
 const bucket = "private-bike-files";
+
+async function hasValidFileSignature(file: File) {
+  const bytes = Buffer.from(await file.slice(0, 12).arrayBuffer());
+  if (file.type === "application/pdf") return bytes.subarray(0, 5).toString() === "%PDF-";
+  if (file.type === "image/jpeg") return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  if (file.type === "image/png") return bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  if (file.type === "image/webp") return bytes.subarray(0, 4).toString() === "RIFF" && bytes.subarray(8, 12).toString() === "WEBP";
+  return false;
+}
 
 export type DocumentActionState = { success?: string; error?: string; url?: string };
 
@@ -38,12 +49,17 @@ export async function uploadDocumentAction(_previous: DocumentActionState, formD
   const fileEntry = formData.get("file");
   if (!(fileEntry instanceof File) || fileEntry.size === 0) return { error: "Choose a file to upload." };
   if (fileEntry.size > maxSize) return { error: "Files must be 20 MB or smaller." };
-  if (!allowedTypes.has(fileEntry.type)) return { error: "Use a PDF, JPEG, PNG, or WebP file." };
+  if (!allowedTypes.has(fileEntry.type) || !(await hasValidFileSignature(fileEntry))) return { error: "Use a valid PDF, JPEG, PNG, or WebP file." };
 
   const auth = await getUserClient();
   if ("error" in auth) return auth;
+  if (!(await consumeUserActionLimit(auth.supabase, "document_upload", 30, 86400))) return { error: "Daily upload limit reached. Try again tomorrow." };
   const { data: bike } = await auth.supabase.from("bikes").select("id").eq("id", parsed.data.bikeId).eq("owner_id", auth.user.id).maybeSingle();
   if (!bike) return { error: "Choose a motorcycle in your garage." };
+  if (parsed.data.serviceRecordId) {
+    const { data: service } = await auth.supabase.from("service_records").select("id").eq("id", parsed.data.serviceRecordId).eq("bike_id", bike.id).eq("owner_id", auth.user.id).maybeSingle();
+    if (!service) return { error: "Choose a service record belonging to this bike." };
+  }
 
   const storagePath = `${auth.user.id}/${bike.id}/${randomUUID()}-${safeFileName(fileEntry.name)}`;
   const { error: uploadError } = await auth.supabase.storage.from(bucket).upload(storagePath, fileEntry, {
@@ -56,6 +72,7 @@ export async function uploadDocumentAction(_previous: DocumentActionState, formD
   const { error: insertError } = await auth.supabase.from("documents").insert({
     owner_id: auth.user.id,
     bike_id: bike.id,
+    service_record_id: parsed.data.serviceRecordId,
     document_type: parsed.data.documentType,
     title: parsed.data.title,
     storage_path: storagePath,
@@ -78,6 +95,7 @@ export async function deleteDocumentAction(_previous: DocumentActionState, formD
   if (!id.success) return { error: "Invalid document." };
   const auth = await getUserClient();
   if ("error" in auth) return auth;
+  if (!(await consumeUserActionLimit(auth.supabase, "document_delete", 30))) return { error: "Too many document changes. Try again in an hour." };
   const { data: document } = await auth.supabase.from("documents").select("storage_path").eq("id", id.data).eq("owner_id", auth.user.id).maybeSingle();
   if (!document) return { error: "Document not found." };
   const { error: removeError } = await auth.supabase.storage.from(bucket).remove([document.storage_path]);
@@ -95,8 +113,10 @@ export async function uploadBikePhotoAction(_previous: DocumentActionState, form
   if (!bikeId.success || !(file instanceof File) || !file.size) return { error: "Choose a photo to upload." };
   if (file.size > 10 * 1024 * 1024) return { error: "Bike photos must be 10 MB or smaller." };
   if (!new Set(["image/jpeg", "image/png", "image/webp"]).has(file.type)) return { error: "Use a JPEG, PNG, or WebP photo." };
+  if (!(await hasValidFileSignature(file))) return { error: "The selected file is not a valid image." };
   const auth = await getUserClient();
   if ("error" in auth) return auth;
+  if (!(await consumeUserActionLimit(auth.supabase, "document_upload", 30, 86400))) return { error: "Daily photo upload limit reached. Try again tomorrow." };
   const { data: bike } = await auth.supabase.from("bikes").select("id,photo_path").eq("id", bikeId.data).eq("owner_id", auth.user.id).maybeSingle();
   if (!bike) return { error: "Bike not found." };
   const extension = file.type === "image/jpeg" ? "jpg" : file.type === "image/png" ? "png" : "webp";

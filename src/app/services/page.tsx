@@ -16,9 +16,10 @@ async function ServicesContent() {
   const bike = bikes?.[0];
   if (!bike) return <section className="rounded-md border border-[#303630] bg-[#191c19] p-6 text-center"><ClipboardList className="mx-auto text-[#d8fa56]" size={22} /><h2 className="mt-3 text-sm font-semibold">Add your motorcycle first</h2><p className="mt-1 text-xs text-[#929990]">Service records are kept with the bike they belong to.</p><Link href="/profile" className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-[#d8fa56]">Set up your bike <ArrowUpRight size={13} /></Link></section>;
 
-  const [{ data: records }, { data: tasks }] = await Promise.all([
+  const [{ data: records }, { data: tasks }, { data: invoices }] = await Promise.all([
     supabase.from("service_records").select("*").eq("owner_id", user.id).eq("bike_id", bike.id).order("service_date", { ascending: false }),
     supabase.from("maintenance_tasks").select("id,name,category").eq("owner_id", user.id).eq("bike_id", bike.id).eq("is_active", true).order("name"),
+    supabase.from("documents").select("id,title,service_record_id").eq("owner_id", user.id).eq("bike_id", bike.id).not("service_record_id", "is", null),
   ]);
   const totalSpend = (records ?? []).reduce((total, record) => total + Number(record.total_cost ?? 0), 0);
 
@@ -39,7 +40,7 @@ async function ServicesContent() {
           </div>
           {record.oil_brand && <p className="mt-2 text-xs text-[#929990]">{record.oil_brand}{record.oil_grade ? ` · ${record.oil_grade}` : ""}{record.oil_quantity_litres ? ` · ${record.oil_quantity_litres} L` : ""}</p>}
           {record.notes && <p className="mt-2 text-xs leading-5 text-[#a3aaa1]">{record.notes}</p>}
-          {record.invoice_path && <p className="mt-2 text-[11px] text-[#a8bd64]">Invoice attached in Documents</p>}
+          {(invoices ?? []).filter((document) => document.service_record_id === record.id).map((document) => <a key={document.id} href={`/api/documents/${document.id}/download`} target="_blank" rel="noopener noreferrer" className="mt-2 mr-3 inline-block text-[11px] text-[#a8bd64] hover:text-[#d8fa56]">{document.title} ↗</a>)}
           <ServiceRecordActions record={record} />
         </article>)}</div> : <div className="px-5 py-8 text-center"><Wrench className="mx-auto text-[#a8bd64]" size={21} /><p className="mt-3 text-sm font-medium">No services recorded yet</p><p className="mt-1 text-xs text-[#929990]">Your completed work and cost history will appear here.</p></div>}
       </section>

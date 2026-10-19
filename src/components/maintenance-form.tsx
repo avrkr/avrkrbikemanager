@@ -8,7 +8,8 @@ const inputClass = "mt-1.5 h-10 w-full rounded-md border border-[#394039] bg-[#1
 
 export function MaintenanceForm({ bikeId, types }: { bikeId: string; types: MaintenanceType[] }) {
   const [state, formAction, isPending] = useActionState<MaintenanceActionState, FormData>(createMaintenanceTaskAction, {});
-  const [custom, setCustom] = useState(false);
+  const [selectedType, setSelectedType] = useState("");
+  const custom = selectedType === "custom";
 
   return (
     <form action={formAction} className="rounded-md border border-[#303630] bg-[#191c19]">
@@ -19,7 +20,7 @@ export function MaintenanceForm({ bikeId, types }: { bikeId: string; types: Main
       </div>
       <div className="grid gap-4 p-4 sm:grid-cols-2 sm:p-5">
         <label className="block text-xs font-medium text-[#c7ccc5] sm:col-span-2" htmlFor="typeId">Task
-          <select id="typeId" name="typeId" className={inputClass} value={custom ? "custom" : undefined} onChange={(event) => setCustom(event.target.value === "custom")} defaultValue={undefined}>
+          <select id="typeId" name="typeId" className={inputClass} value={selectedType} onChange={(event) => setSelectedType(event.target.value)}>
             <option value="" disabled>Select a maintenance task</option>
             {types.map((type) => <option key={type.id} value={type.id}>{type.name} · {type.category}{type.guidance_note ? " · estimate" : ""}</option>)}
             <option value="custom">Custom task</option>

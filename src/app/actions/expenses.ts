@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { hasSupabaseConfiguration } from "@/lib/env";
+import { consumeUserActionLimit } from "@/lib/security/rate-limit";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const expenseSchema = z.object({
@@ -47,6 +48,7 @@ export async function createExpenseAction(_previous: ExpenseActionState, formDat
   if (!parsed.success) return { error: "Check the expense details and try again." };
   const auth = await getAuthenticatedSupabase();
   if ("error" in auth) return auth;
+  if (!(await consumeUserActionLimit(auth.supabase, "expense_write", 100))) return { error: "Too many expenses. Try again in an hour." };
   const { data: bike } = await auth.supabase.from("bikes").select("id,current_odometer").eq("id", parsed.data.bikeId).eq("owner_id", auth.user.id).maybeSingle();
   if (!bike) return { error: "Choose a motorcycle in your garage." };
   if (parsed.data.odometer !== null && parsed.data.odometer < bike.current_odometer) return { error: "Expense odometer cannot be below the current reading. Use the correction form if this is an odometer correction." };
@@ -72,6 +74,7 @@ export async function createFuelAction(_previous: ExpenseActionState, formData: 
   if (!parsed.success) return { error: "Check the fuel details and try again." };
   const auth = await getAuthenticatedSupabase();
   if ("error" in auth) return auth;
+  if (!(await consumeUserActionLimit(auth.supabase, "fuel_write", 60))) return { error: "Too many fuel entries. Try again in an hour." };
   const { data: bike } = await auth.supabase.from("bikes").select("id").eq("id", parsed.data.bikeId).eq("owner_id", auth.user.id).maybeSingle();
   if (!bike) return { error: "Choose a motorcycle in your garage." };
 
@@ -95,6 +98,7 @@ export async function updateOdometerAction(_previous: ExpenseActionState, formDa
   if (!parsed.success) return { error: "Enter a valid odometer reading." };
   const auth = await getAuthenticatedSupabase();
   if ("error" in auth) return auth;
+  if (!(await consumeUserActionLimit(auth.supabase, "odometer_write", 60))) return { error: "Too many odometer entries. Try again in an hour." };
   const { data: bike } = await auth.supabase.from("bikes").select("id").eq("id", parsed.data.bikeId).eq("owner_id", auth.user.id).maybeSingle();
   if (!bike) return { error: "Choose a motorcycle in your garage." };
   const { error } = await auth.supabase.rpc("record_odometer_reading", {

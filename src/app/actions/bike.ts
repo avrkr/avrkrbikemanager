@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { hasSupabaseConfiguration } from "@/lib/env";
+import { consumeUserActionLimit } from "@/lib/security/rate-limit";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const optionalText = (limit: number) => z.string().trim().max(limit).optional().transform((value) => value || null);
@@ -48,6 +49,7 @@ export async function saveBikeAction(_previous: BikeActionState, formData: FormD
   const supabase = await createSupabaseServerClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) return { error: "Your session has expired. Sign in again to continue." };
+  if (!(await consumeUserActionLimit(supabase, "bike_write", 30))) return { error: "Too many bike profile changes. Try again in an hour." };
 
   const { id, correction_reason: correctionReason, ...bikeValues } = parsed.data;
   let existingOdometer: number | null = null;

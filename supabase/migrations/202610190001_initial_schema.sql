@@ -166,6 +166,7 @@ create table public.documents (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid not null references auth.users(id) on delete cascade,
   bike_id uuid not null,
+  service_record_id uuid,
   document_type text not null check (document_type in ('registration', 'insurance', 'puc', 'invoice', 'warranty', 'receipt', 'other')),
   title text not null,
   storage_path text not null,
@@ -175,6 +176,7 @@ create table public.documents (
   expiry_date date,
   uploaded_at timestamptz not null default now(),
   foreign key (bike_id, owner_id) references public.bikes(id, owner_id) on delete cascade,
+  foreign key (service_record_id, owner_id) references public.service_records(id, owner_id) on delete set null (service_record_id),
   unique (id, owner_id)
 );
 
@@ -199,10 +201,13 @@ create table public.notification_logs (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid not null references auth.users(id) on delete cascade,
   task_id uuid,
+  bike_id uuid,
   document_id uuid,
   channel text not null check (channel in ('email', 'telegram')),
   event_key text not null,
   dedupe_key text not null unique,
+  schedule_version text not null,
+  payload jsonb not null default '{}'::jsonb,
   delivery_status text not null default 'pending' check (delivery_status in ('pending', 'sending', 'sent', 'failed')),
   attempts integer not null default 0 check (attempts >= 0),
   claimed_at timestamptz,
@@ -211,6 +216,7 @@ create table public.notification_logs (
   error_message text,
   created_at timestamptz not null default now(),
   foreign key (task_id, owner_id) references public.maintenance_tasks(id, owner_id) on delete set null (task_id),
+  foreign key (bike_id, owner_id) references public.bikes(id, owner_id) on delete set null (bike_id),
   foreign key (document_id, owner_id) references public.documents(id, owner_id) on delete set null (document_id)
 );
 
@@ -227,12 +233,21 @@ create table public.odometer_logs (
   foreign key (bike_id, owner_id) references public.bikes(id, owner_id) on delete cascade
 );
 
+create table public.user_action_limits (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  action_name text not null,
+  window_started_at timestamptz not null default now(),
+  request_count integer not null default 0 check (request_count >= 0),
+  primary key (user_id, action_name)
+);
+
 create index bikes_owner_idx on public.bikes(owner_id);
 create index maintenance_tasks_owner_bike_due_idx on public.maintenance_tasks(owner_id, bike_id, next_due_date, next_due_odometer) where is_active;
 create index service_records_owner_bike_date_idx on public.service_records(owner_id, bike_id, service_date desc);
 create index expenses_owner_bike_date_idx on public.expenses(owner_id, bike_id, expense_date desc);
 create index fuel_logs_owner_bike_date_idx on public.fuel_logs(owner_id, bike_id, refuelled_at desc, odometer);
 create index documents_owner_bike_expiry_idx on public.documents(owner_id, bike_id, expiry_date);
+create index documents_service_record_idx on public.documents(owner_id, service_record_id) where service_record_id is not null;
 create index notification_logs_pending_idx on public.notification_logs(delivery_status, next_attempt_at) where delivery_status in ('pending', 'failed');
 create index odometer_logs_owner_bike_date_idx on public.odometer_logs(owner_id, bike_id, recorded_at desc);
 
@@ -255,13 +270,13 @@ begin
 end;
 $$;
 
-create trigger odometer_reading_guard before insert on public.odometer_logs
+create trigger odometer_reading_guard before insert or update on public.odometer_logs
 for each row execute function public.guard_odometer_reading();
 
 do $$
 declare table_name text;
 begin
-  foreach table_name in array array['profiles', 'bikes', 'maintenance_types', 'maintenance_tasks', 'service_records', 'expenses', 'fuel_logs', 'documents', 'notification_preferences', 'notification_logs', 'odometer_logs'] loop
+  foreach table_name in array array['profiles', 'bikes', 'maintenance_types', 'maintenance_tasks', 'service_records', 'expenses', 'fuel_logs', 'documents', 'notification_preferences', 'notification_logs', 'odometer_logs', 'user_action_limits'] loop
     execute format('alter table public.%I enable row level security', table_name);
   end loop;
 end;
@@ -282,6 +297,7 @@ create policy documents_own on public.documents for all using (owner_id = (selec
 create policy notification_preferences_own on public.notification_preferences for all using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 create policy notification_logs_read_own on public.notification_logs for select using (owner_id = (select auth.uid()));
 create policy odometer_logs_own on public.odometer_logs for all using (owner_id = (select auth.uid())) with check (owner_id = (select auth.uid()));
+create policy user_action_limits_own on public.user_action_limits for all using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 create or replace function public.handle_new_auth_user()
 returns trigger language plpgsql security definer set search_path = '' as $$
@@ -289,6 +305,7 @@ begin
   insert into public.profiles (id, email, display_name)
   values (new.id, new.email, coalesce(new.raw_user_meta_data ->> 'display_name', ''))
   on conflict (id) do update set email = excluded.email;
+  insert into public.notification_preferences (user_id) values (new.id) on conflict do nothing;
   return new;
 end;
 $$;
@@ -481,6 +498,40 @@ end;
 $$;
 
 grant execute on function public.record_odometer_reading(uuid, integer, text, text) to authenticated;
+
+create or replace function public.consume_user_action_limit(p_action_name text, p_limit integer, p_window_seconds integer)
+returns boolean
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  current_owner uuid := (select auth.uid());
+  updated_count integer;
+begin
+  if current_owner is null or p_action_name not in ('bike_write', 'maintenance_write', 'service_write', 'expense_write', 'fuel_write', 'odometer_write', 'document_upload', 'document_delete', 'document_download', 'notification_settings') or p_limit not between 1 and 1000 or p_window_seconds not between 1 and 86400 then
+    return false;
+  end if;
+
+  insert into public.user_action_limits (user_id, action_name, window_started_at, request_count)
+  values (current_owner, p_action_name, now(), 1)
+  on conflict (user_id, action_name) do update
+    set window_started_at = case
+          when public.user_action_limits.window_started_at <= now() - make_interval(secs => p_window_seconds) then now()
+          else public.user_action_limits.window_started_at
+        end,
+        request_count = case
+          when public.user_action_limits.window_started_at <= now() - make_interval(secs => p_window_seconds) then 1
+          else public.user_action_limits.request_count + 1
+        end
+  returning request_count into updated_count;
+
+  return updated_count <= p_limit;
+end;
+$$;
+
+revoke all on function public.consume_user_action_limit(text, integer, integer) from public, anon;
+grant execute on function public.consume_user_action_limit(text, integer, integer) to authenticated;
 
 create or replace function public.claim_notification(p_notification_id uuid)
 returns boolean

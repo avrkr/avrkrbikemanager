@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { hasSupabaseConfiguration } from "@/lib/env";
 import { addDaysToDate, dateInIndia, getMaintenanceStatus } from "@/lib/maintenance";
+import { consumeUserActionLimit } from "@/lib/security/rate-limit";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const taskSchema = z.object({
@@ -31,6 +32,7 @@ export async function createMaintenanceTaskAction(_previous: MaintenanceActionSt
   const supabase = await createSupabaseServerClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) return { error: "Your session has expired. Sign in again to continue." };
+  if (!(await consumeUserActionLimit(supabase, "maintenance_write", 40))) return { error: "Too many maintenance changes. Try again in an hour." };
 
   const { data: bike, error: bikeError } = await supabase.from("bikes").select("id,current_odometer").eq("id", parsed.data.bikeId).eq("owner_id", user.id).maybeSingle();
   if (bikeError || !bike) return { error: "Choose a motorcycle in your garage before adding maintenance." };
@@ -101,6 +103,7 @@ export async function updateMaintenanceTaskAction(_previous: MaintenanceActionSt
   const supabase = await createSupabaseServerClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) return { error: "Your session has expired. Sign in again." };
+  if (!(await consumeUserActionLimit(supabase, "maintenance_write", 40))) return { error: "Too many maintenance changes. Try again in an hour." };
   const { data: task } = await supabase.from("maintenance_tasks").select("id,bike_id,owner_id").eq("id", parsed.data.taskId).eq("owner_id", user.id).maybeSingle();
   if (!task) return { error: "Maintenance task not found." };
   const { data: bike } = await supabase.from("bikes").select("current_odometer").eq("id", task.bike_id).eq("owner_id", user.id).maybeSingle();
@@ -139,6 +142,7 @@ export async function deleteMaintenanceTaskAction(_previous: MaintenanceActionSt
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Your session has expired. Sign in again." };
+  if (!(await consumeUserActionLimit(supabase, "maintenance_write", 40))) return { error: "Too many maintenance changes. Try again in an hour." };
   const { error } = await supabase.from("maintenance_tasks").update({ is_active: false }).eq("id", taskId.data).eq("owner_id", user.id);
   if (error) return { error: "Unable to archive this maintenance schedule." };
   revalidatePath("/");

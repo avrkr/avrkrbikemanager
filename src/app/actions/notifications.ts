@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { hasSupabaseConfiguration } from "@/lib/env";
+import { consumeUserActionLimit } from "@/lib/security/rate-limit";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const preferencesSchema = z.object({
@@ -22,6 +23,7 @@ export async function saveNotificationPreferencesAction(_previous: NotificationA
   const supabase = await createSupabaseServerClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) return { error: "Your session has expired. Sign in again." };
+  if (!(await consumeUserActionLimit(supabase, "notification_settings", 30))) return { error: "Too many settings changes. Try again in an hour." };
 
   const { error: profileError } = await supabase.from("profiles").update({ telegram_chat_id: parsed.data.telegramChatId || null }).eq("id", user.id);
   if (profileError) return { error: "Unable to save your Telegram destination." };
@@ -52,6 +54,7 @@ export async function saveTaskNotificationPreferencesAction(_previous: Notificat
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Your session has expired. Sign in again." };
+  if (!(await consumeUserActionLimit(supabase, "notification_settings", 30))) return { error: "Too many settings changes. Try again in an hour." };
   const { data: task } = await supabase.from("maintenance_tasks").select("id").eq("id", parsed.data.taskId).eq("owner_id", user.id).maybeSingle();
   if (!task) return { error: "Maintenance task not found." };
   const values = {

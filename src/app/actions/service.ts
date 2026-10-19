@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { hasSupabaseConfiguration } from "@/lib/env";
+import { getMaintenanceStatus } from "@/lib/maintenance";
+import { consumeUserActionLimit } from "@/lib/security/rate-limit";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const optionalString = (limit: number) => z.string().trim().max(limit).optional().transform((value) => value || null);
@@ -36,6 +38,7 @@ export async function createServiceAction(_previous: ServiceActionState, formDat
   const supabase = await createSupabaseServerClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) return { error: "Your session has expired. Sign in again to continue." };
+  if (!(await consumeUserActionLimit(supabase, "service_write", 40))) return { error: "Too many service changes. Try again in an hour." };
   const { data: bike } = await supabase.from("bikes").select("id,current_odometer").eq("id", parsed.data.bikeId).eq("owner_id", user.id).maybeSingle();
   if (!bike) return { error: "Choose a motorcycle in your garage." };
 
@@ -73,6 +76,7 @@ export async function updateServiceAction(_previous: ServiceActionState, formDat
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Your session has expired. Sign in again." };
+  if (!(await consumeUserActionLimit(supabase, "service_write", 40))) return { error: "Too many service changes. Try again in an hour." };
 
   const { data: existing } = await supabase.from("service_records").select("id,maintenance_task_id,bike_id,owner_id").eq("id", id.data).eq("owner_id", user.id).maybeSingle();
   if (!existing) return { error: "Service record not found." };
@@ -102,18 +106,31 @@ export async function updateServiceAction(_previous: ServiceActionState, formDat
   if (expenseError) return { error: "Service updated, but its linked expense could not be synchronized." };
 
   if (existing.maintenance_task_id) {
-    const { data: task } = await supabase.from("maintenance_tasks").select("interval_days,interval_km").eq("id", existing.maintenance_task_id).eq("owner_id", user.id).maybeSingle();
+    const [{ data: task }, { data: latest }, { data: bike }] = await Promise.all([
+      supabase.from("maintenance_tasks").select("interval_days,interval_km").eq("id", existing.maintenance_task_id).eq("owner_id", user.id).maybeSingle(),
+      supabase.from("service_records").select("service_date,odometer").eq("maintenance_task_id", existing.maintenance_task_id).eq("owner_id", user.id).order("service_date", { ascending: false }).limit(1).maybeSingle(),
+      supabase.from("bikes").select("id,current_odometer").eq("id", existing.bike_id).eq("owner_id", user.id).maybeSingle(),
+    ]);
     if (task) {
-      const dueDate = task.interval_days ? new Date(`${parsed.data.serviceDate}T12:00:00Z`) : null;
+      const dueDate = latest && task.interval_days ? new Date(`${latest.service_date}T12:00:00Z`) : null;
       if (dueDate && task.interval_days) dueDate.setUTCDate(dueDate.getUTCDate() + task.interval_days);
-      await supabase.from("maintenance_tasks").update({
-        last_completed_date: parsed.data.serviceDate,
-        last_completed_odometer: parsed.data.odometer,
-        next_due_date: dueDate?.toISOString().slice(0, 10) ?? null,
-        next_due_odometer: task.interval_km ? parsed.data.odometer + task.interval_km : null,
-        status: "upcoming",
+      const nextDueDate = dueDate?.toISOString().slice(0, 10) ?? null;
+      const nextDueOdometer = latest && task.interval_km ? latest.odometer + task.interval_km : null;
+      const { error: taskError } = await supabase.from("maintenance_tasks").update({
+        last_completed_date: latest?.service_date ?? null,
+        last_completed_odometer: latest?.odometer ?? null,
+        next_due_date: nextDueDate,
+        next_due_odometer: nextDueOdometer,
+        status: latest ? getMaintenanceStatus({ next_due_date: nextDueDate, next_due_odometer: nextDueOdometer }, bike?.current_odometer ?? 0) : "due",
       }).eq("id", existing.maintenance_task_id).eq("owner_id", user.id);
+      if (taskError) return { error: "Service updated, but its maintenance schedule could not be recalculated." };
     }
+  }
+  const { data: bike } = await supabase.from("bikes").select("id,current_odometer").eq("id", existing.bike_id).eq("owner_id", user.id).maybeSingle();
+  if (bike && parsed.data.odometer > bike.current_odometer) {
+    const { error: bikeError } = await supabase.from("bikes").update({ current_odometer: parsed.data.odometer }).eq("id", bike.id).eq("owner_id", user.id);
+    const { error: logError } = await supabase.from("odometer_logs").insert({ owner_id: user.id, bike_id: bike.id, odometer: parsed.data.odometer, source: "service", notes: "Updated from edited service record" });
+    if (bikeError || logError) return { error: "Service updated, but the current odometer could not be synchronized." };
   }
   revalidatePath("/");
   revalidatePath("/services");
@@ -128,6 +145,7 @@ export async function deleteServiceAction(_previous: ServiceActionState, formDat
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Your session has expired. Sign in again." };
+  if (!(await consumeUserActionLimit(supabase, "service_write", 40))) return { error: "Too many service changes. Try again in an hour." };
   const { data: record } = await supabase.from("service_records").select("id,maintenance_task_id,owner_id").eq("id", id.data).eq("owner_id", user.id).maybeSingle();
   if (!record) return { error: "Service record not found." };
   const { error: expenseError } = await supabase.from("expenses").delete().eq("service_record_id", id.data).eq("owner_id", user.id);

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { hasSupabaseConfiguration } from "@/lib/env";
+import { consumeUserActionLimit } from "@/lib/security/rate-limit";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export async function GET(_request: Request, context: RouteContext<"/api/documents/[id]/download">) {
@@ -9,6 +10,7 @@ export async function GET(_request: Request, context: RouteContext<"/api/documen
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  if (!(await consumeUserActionLimit(supabase, "document_download", 120))) return NextResponse.json({ error: "Too many downloads. Try again in an hour." }, { status: 429 });
   const { data: document } = await supabase.from("documents").select("storage_path").eq("id", id).eq("owner_id", user.id).maybeSingle();
   if (!document) return NextResponse.json({ error: "Document not found." }, { status: 404 });
   const { data, error } = await supabase.storage.from("private-bike-files").createSignedUrl(document.storage_path, 60, { download: true });

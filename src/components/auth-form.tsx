@@ -45,8 +45,9 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" | "forgot-passw
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email: values.email, password: values.password });
         if (error) throw error;
-        const next = new URLSearchParams(window.location.search).get("next");
-        window.location.assign(next?.startsWith("/") && !next.startsWith("//") ? next : "/");
+        const requestedNext = new URLSearchParams(window.location.search).get("next") ?? "/";
+        const nextUrl = new URL(requestedNext, window.location.origin);
+        window.location.assign(nextUrl.origin === window.location.origin ? `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}` : "/");
       }
     } catch (error) {
       setIsError(true);

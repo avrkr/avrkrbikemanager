@@ -54,6 +54,17 @@ export async function DashboardData() {
   const taskStatus = nextTask ? getMaintenanceStatus(nextTask, bike.current_odometer ?? 0) : null;
   const statusColors = { overdue: "text-[#ff958b]", due: "text-[#f3c879]", upcoming: "text-[#c3d98c]", completed: "text-[#91c5a4]" };
   const bikeName = bike.name || `${bike.manufacturer} ${bike.model}`;
+  const [calendarYear, calendarMonth] = today.split("-").map(Number);
+  const firstWeekday = new Date(Date.UTC(calendarYear, calendarMonth - 1, 1)).getUTCDay();
+  const daysInMonth = new Date(Date.UTC(calendarYear, calendarMonth, 0)).getUTCDate();
+  const calendarCells = [...Array.from({ length: firstWeekday }, () => null), ...Array.from({ length: daysInMonth }, (_, index) => index + 1)];
+  const dueByDate = new Map<string, string[]>();
+  for (const task of activeTasks) {
+    if (!task.next_due_date) continue;
+    const dueTasks = dueByDate.get(task.next_due_date) ?? [];
+    dueTasks.push(task.name);
+    dueByDate.set(task.next_due_date, dueTasks);
+  }
 
   return <>
     <section aria-label="Motorcycle profile" className="relative isolate mb-5 overflow-hidden rounded-md border border-[#394133] bg-[#1a1e19]"><div className="absolute inset-0 -z-10 bg-[linear-gradient(90deg,#161a16_0%,rgb(22_26_22_/_0.97)_38%,rgb(22_26_22_/_0.3)_100%),url('https://images.unsplash.com/photo-1558981806-ec527fa84c39?auto=format&fit=crop&w=1600&q=85')] bg-cover bg-center opacity-85" /><div className="flex min-h-[250px] flex-col justify-between gap-8 p-5 sm:flex-row sm:items-end sm:p-8"><div className="max-w-xl"><span className="inline-flex items-center gap-2 rounded-sm border border-[#d8fa56]/25 bg-[#111311]/65 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-[#d8fa56]"><span className="size-1.5 rounded-full bg-[#d8fa56]" /> Garage active</span><h2 className="mt-5 text-2xl font-semibold sm:text-[30px]">{bikeName}</h2><p className="mt-2 text-sm leading-6 text-[#bdc3ba]">{bike.current_odometer.toLocaleString("en-IN")} km on the clock. Your history stays tied to this bike.</p></div><Link href="/profile" className="inline-flex min-h-11 w-fit items-center gap-2 rounded-md border border-[#59654b] bg-[#111311]/55 px-4 text-xs font-semibold hover:bg-[#111311]/85">Edit bike profile <ArrowUpRight size={15} /></Link></div></section>
@@ -70,6 +81,22 @@ export async function DashboardData() {
       </section>
       <section className="rounded-md border border-[#303630] bg-[#191c19]"><div className="border-b border-[#303630] px-4 py-4 sm:px-5"><h2 className="text-sm font-semibold">Quick actions</h2><p className="mt-1 text-xs text-[#929990]">Keep the essentials close.</p></div><div className="grid gap-2 p-4 sm:p-5"><QuickAction href="/services" icon={Wrench} label="Record a service" /><QuickAction href="/expenses" icon={Gauge} label="Update odometer" /><QuickAction href="/documents" icon={ShieldCheck} label="Add a document" /></div></section>
     </div>
+    <section className="mt-5 rounded-md border border-[#303630] bg-[#191c19]">
+      <div className="border-b border-[#303630] px-4 py-4 sm:px-5"><h2 className="text-sm font-semibold">Maintenance calendar</h2><p className="mt-1 text-xs text-[#929990]">{new Date(Date.UTC(calendarYear, calendarMonth - 1, 1)).toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" })} · dates with markers have scheduled work.</p></div>
+      <div className="grid grid-cols-7 gap-px p-3 sm:p-4">
+        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((weekday) => <span key={weekday} className="pb-2 text-center text-[9px] font-semibold uppercase text-[#737b71]">{weekday}</span>)}
+        {calendarCells.map((day, index) => {
+          const date = day === null ? "" : `${today.slice(0, 7)}-${String(day).padStart(2, "0")}`;
+          const dueTasks = date ? dueByDate.get(date) ?? [] : [];
+          const isToday = date === today;
+          return <div key={`${date || "blank"}-${index}`} title={dueTasks.join(", ")} aria-label={day === null ? undefined : `${date}${dueTasks.length ? `: ${dueTasks.join(", ")}` : ""}`} className={`flex min-h-[42px] flex-col items-center justify-center rounded-sm text-[11px] ${day === null ? "" : isToday ? "bg-[#252b22] font-semibold text-[#d8fa56]" : "text-[#a3aaa1]"}`}>
+            {day}
+            {dueTasks.length > 0 && <span className="mt-1 flex gap-0.5" aria-hidden="true">{dueTasks.slice(0, 3).map((task, taskIndex) => <span key={`${task}-${taskIndex}`} className="size-1 rounded-full bg-[#d8fa56]" />)}</span>}
+          </div>;
+        })}
+      </div>
+      <p className="px-4 pb-4 text-[10px] text-[#7f877e]">Date intervals only. Mileage thresholds remain visible in the schedule list.</p>
+    </section>
     <section className="mt-5 rounded-md border border-[#303630] bg-[#191c19]"><div className="flex items-center justify-between border-b border-[#303630] px-4 py-4 sm:px-5"><div><h2 className="text-sm font-semibold">Recent service history</h2><p className="mt-1 text-xs text-[#929990]">Recent work and recorded cost.</p></div><Link href="/services" className="text-xs font-medium text-[#d8fa56]">All services <ArrowUpRight className="ml-1 inline" size={13} /></Link></div>{records?.length ? <div className="divide-y divide-[#303630]">{records.map((record) => <div key={record.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 sm:px-5"><div><p className="text-xs font-medium">{record.work_performed || "Service visit"}</p><p className="mt-1 text-[10px] text-[#929990]">{new Date(`${record.service_date}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })} · {Number(record.odometer).toLocaleString("en-IN")} km · {record.workshop || "Workshop not recorded"}</p></div><p className="text-xs font-semibold">{currency(Number(record.total_cost))}</p></div>)}</div> : <div className="px-5 py-6 text-center text-xs text-[#929990]">Completed service records will appear here.</div>}</section>
     <footer className="mt-8 flex flex-col justify-between gap-2 border-t border-[#272c27] pt-4 text-[10px] text-[#737b71] sm:flex-row"><span>Manual odometer entry. No GPS or vehicle sensor connection.</span><span>Intervals are yours to set; generic defaults are estimates.</span></footer>
   </>;
