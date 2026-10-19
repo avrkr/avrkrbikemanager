@@ -3,11 +3,13 @@ import { Suspense } from "react";
 import { ArrowLeft } from "lucide-react";
 import { AppShell, SectionHeading } from "@/components/app-shell";
 import { BikeProfileForm } from "@/components/bike-profile-form";
+import { BikePhotoForm } from "@/components/bike-photo-form";
 import { hasSupabaseConfiguration } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 async function ProfileContent() {
   let bike: Record<string, unknown> | undefined;
+  let photoUrl: string | undefined;
   let setupMessage = "";
 
   if (!hasSupabaseConfiguration()) {
@@ -18,6 +20,10 @@ async function ProfileContent() {
     if (user) {
       const { data } = await supabase.from("bikes").select("*").eq("owner_id", user.id).order("created_at").limit(1).maybeSingle();
       bike = data ?? undefined;
+      if (typeof bike?.photo_path === "string") {
+        const { data: photo } = await supabase.storage.from("private-bike-files").createSignedUrl(bike.photo_path, 60);
+        photoUrl = photo?.signedUrl;
+      }
     }
   }
 
@@ -26,6 +32,7 @@ async function ProfileContent() {
       <Link href="/" className="mb-5 inline-flex items-center gap-1.5 text-xs text-[#929990] hover:text-[#f0f2ed]"><ArrowLeft size={14} /> Back to overview</Link>
       <SectionHeading eyebrow="Garage profile" title={bike ? "Bike profile" : "Add your motorcycle"} detail="Keep the details and documents that make this bike yours." />
       {setupMessage && <p className="mb-4 rounded-md border border-[#6b542c] bg-[#2b2418] px-4 py-3 text-xs leading-5 text-[#f3c879]">{setupMessage}</p>}
+      {typeof bike?.id === "string" && <BikePhotoForm bikeId={bike.id} photoUrl={photoUrl} />}
       <BikeProfileForm bike={bike} />
     </>
   );

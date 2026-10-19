@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { ArrowUpRight, CalendarClock, CirclePlus, Gauge, Wrench } from "lucide-react";
 import { AppShell, SectionHeading } from "@/components/app-shell";
 import { MaintenanceForm } from "@/components/maintenance-form";
+import { TaskNotificationForm } from "@/components/notification-settings-form";
 import { hasSupabaseConfiguration } from "@/lib/env";
 import { getMaintenanceStatus } from "@/lib/maintenance";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -24,9 +25,10 @@ async function MaintenanceContent() {
   const bike = bikes?.[0];
   if (!bike) return <section className="rounded-md border border-[#303630] bg-[#191c19] p-6 text-center"><Wrench className="mx-auto text-[#d8fa56]" size={22} /><h2 className="mt-3 text-sm font-semibold">Add a bike to begin</h2><p className="mt-1 text-xs text-[#929990]">Maintenance schedules belong to a specific motorcycle.</p><Link href="/profile" className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-[#d8fa56]">Add motorcycle <ArrowUpRight size={13} /></Link></section>;
 
-  const [{ data: tasks }, { data: types }] = await Promise.all([
+  const [{ data: tasks }, { data: types }, { data: preferences }] = await Promise.all([
     supabase.from("maintenance_tasks").select("*").eq("owner_id", user.id).eq("bike_id", bike.id).eq("is_active", true).order("next_due_date", { ascending: true, nullsFirst: false }),
     supabase.from("maintenance_types").select("id,name,category,guidance_note").order("category").order("name"),
+    supabase.from("notification_preferences").select("*").eq("user_id", user.id).not("task_id", "is", null),
   ]);
 
   return (
@@ -47,6 +49,7 @@ async function MaintenanceContent() {
                 {task.next_due_odometer !== null && <span className="inline-flex items-center gap-1.5"><Gauge size={13} /> {Number(task.next_due_odometer).toLocaleString("en-IN")} km</span>}
                 {task.estimated_cost !== null && <span>Est. ₹{Number(task.estimated_cost).toLocaleString("en-IN")}</span>}
               </div>
+              <div className="sm:col-span-2"><TaskNotificationForm taskId={task.id} settings={preferences?.find((item) => item.task_id === task.id)} /></div>
             </article>;
           })}
         </div>

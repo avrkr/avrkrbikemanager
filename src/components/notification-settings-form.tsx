@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { saveNotificationPreferencesAction, type NotificationActionState } from "@/app/actions/notifications";
+import { saveNotificationPreferencesAction, saveTaskNotificationPreferencesAction, type NotificationActionState } from "@/app/actions/notifications";
 
 const inputClass = "mt-1.5 h-10 w-full rounded-md border border-[#394039] bg-[#151815] px-3 text-sm text-[#f0f2ed] focus:border-[#a8bd64] focus:outline-none";
 
@@ -19,4 +19,20 @@ export function NotificationSettingsForm({ settings }: { settings: { emailEnable
     </div>
     <div className="flex flex-col gap-3 border-t border-[#303630] px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5"><p role="status" className={`text-xs ${state.error ? "text-[#ff958b]" : "text-[#d8fa56]"}`}>{state.error ?? state.success ?? "Daily reminder checks run at 9:00 AM India Standard Time."}</p><button disabled={pending} className="h-10 rounded-md bg-[#d8fa56] px-4 text-xs font-semibold text-[#151811] disabled:opacity-60">{pending ? "Saving…" : "Save preferences"}</button></div>
   </form>;
+}
+
+export function TaskNotificationForm({ taskId, settings }: { taskId: string; settings?: { email_enabled: boolean; telegram_enabled: boolean; reminders_before_days: number; mileage_lead_km: number; overdue_every_days: number } }) {
+  const [state, action, pending] = useActionState<NotificationActionState, FormData>(saveTaskNotificationPreferencesAction, {});
+  return <details className="mt-3 border-t border-[#303630] pt-3">
+    <summary className="w-fit cursor-pointer text-[11px] font-medium text-[#a8bd64]">Task reminder settings</summary>
+    <form action={action} className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <input type="hidden" name="taskId" value={taskId} />
+      <label className="flex items-center gap-2 text-xs text-[#c7ccc5]"><input type="checkbox" name="emailEnabled" defaultChecked={settings?.email_enabled ?? true} className="size-4 accent-[#d8fa56]" />Email for this task</label>
+      <label className="flex items-center gap-2 text-xs text-[#c7ccc5]"><input type="checkbox" name="telegramEnabled" defaultChecked={settings?.telegram_enabled ?? false} className="size-4 accent-[#d8fa56]" />Telegram for this task</label>
+      <label className="text-[11px] text-[#a3aaa1]">Date lead time (days)<input required type="number" min="0" max="90" name="remindersBeforeDays" defaultValue={settings?.reminders_before_days ?? 3} className={inputClass} /></label>
+      <label className="text-[11px] text-[#a3aaa1]">Mileage lead (km)<input required type="number" min="0" max="10000" name="mileageLeadKm" defaultValue={settings?.mileage_lead_km ?? 200} className={inputClass} /></label>
+      <label className="text-[11px] text-[#a3aaa1]">Repeat overdue every (days)<input required type="number" min="1" max="30" name="overdueEveryDays" defaultValue={settings?.overdue_every_days ?? 3} className={inputClass} /></label>
+      <div className="flex items-end gap-3"><button disabled={pending} className="h-10 rounded-md border border-[#46513a] px-3 text-xs font-medium text-[#d8fa56] disabled:opacity-60">{pending ? "Saving…" : "Save task settings"}</button>{(state.success || state.error) && <span role="status" className={`pb-2 text-[10px] ${state.error ? "text-[#ff958b]" : "text-[#d8fa56]"}`}>{state.error ?? state.success}</span>}</div>
+    </form>
+  </details>;
 }

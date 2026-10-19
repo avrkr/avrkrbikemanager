@@ -52,6 +52,13 @@ function NavLink({ href, label, icon: Icon }: (typeof navigation)[number]) {
   );
 }
 
+function MobileNavLink({ href, label, icon: Icon }: (typeof navigation)[number]) {
+  const pathname = usePathname();
+  const active = href === "/" ? pathname === href : pathname.startsWith(href);
+  const mobileLabel = label === "Maintenance" ? "Service" : label === "Service history" ? "History" : label === "Fuel & expenses" ? "Costs" : "Home";
+  return <Link href={href} aria-current={active ? "page" : undefined} className={`flex min-h-[62px] flex-col items-center justify-center gap-1 text-[10px] ${active ? "text-[#d8fa56]" : "text-[#929990]"}`}><Icon size={18} strokeWidth={1.8} />{mobileLabel}</Link>;
+}
+
 function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <>
@@ -163,16 +170,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       <nav aria-label="Mobile navigation" className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-4 border-t border-[#303630] bg-[#141714]/95 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden">
-        {mobileNavigation.map(({ href, label, icon: Icon }) => {
-          const pathname = usePathname();
-          const active = href === "/" ? pathname === href : pathname.startsWith(href);
-          return (
-            <Link key={href} href={href} aria-current={active ? "page" : undefined} className={`flex min-h-[62px] flex-col items-center justify-center gap-1 text-[10px] ${active ? "text-[#d8fa56]" : "text-[#929990]"}`}>
-              <Icon size={18} strokeWidth={1.8} />
-              {label === "Maintenance" ? "Service" : label === "Service history" ? "History" : label === "Fuel & expenses" ? "Costs" : "Home"}
-            </Link>
-          );
-        })}
+        {mobileNavigation.map((item) => <MobileNavLink key={item.href} {...item} />)}
       </nav>
     </div>
   );

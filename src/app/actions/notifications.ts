@@ -44,6 +44,34 @@ export async function saveNotificationPreferencesAction(_previous: NotificationA
   return { success: "Notification preferences saved." };
 }
 
+export async function saveTaskNotificationPreferencesAction(_previous: NotificationActionState, formData: FormData): Promise<NotificationActionState> {
+  if (!hasSupabaseConfiguration()) return { error: "Configure Supabase before saving notification settings." };
+  const schema = preferencesSchema.extend({ taskId: z.string().uuid() });
+  const parsed = schema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "Check the reminder settings and try again." };
+  const supabase = await createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Your session has expired. Sign in again." };
+  const { data: task } = await supabase.from("maintenance_tasks").select("id").eq("id", parsed.data.taskId).eq("owner_id", user.id).maybeSingle();
+  if (!task) return { error: "Maintenance task not found." };
+  const values = {
+    user_id: user.id,
+    task_id: task.id,
+    email_enabled: formData.get("emailEnabled") === "on",
+    telegram_enabled: formData.get("telegramEnabled") === "on",
+    reminders_before_days: parsed.data.remindersBeforeDays,
+    mileage_lead_km: parsed.data.mileageLeadKm,
+    overdue_every_days: parsed.data.overdueEveryDays,
+  };
+  const { data: existing } = await supabase.from("notification_preferences").select("id").eq("user_id", user.id).eq("task_id", task.id).maybeSingle();
+  const result = existing
+    ? await supabase.from("notification_preferences").update(values).eq("id", existing.id).eq("user_id", user.id)
+    : await supabase.from("notification_preferences").insert(values);
+  if (result.error) return { error: "Unable to save task reminder preferences." };
+  revalidatePath("/maintenance");
+  return { success: "Task reminder preferences saved." };
+}
+
 export async function signOutAction() {
   if (hasSupabaseConfiguration()) {
     const supabase = await createSupabaseServerClient();

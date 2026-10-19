@@ -1,7 +1,7 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
-import { deleteDocumentAction, getDocumentUrlAction, uploadDocumentAction, type DocumentActionState } from "@/app/actions/documents";
+import { useActionState } from "react";
+import { deleteDocumentAction, uploadDocumentAction, type DocumentActionState } from "@/app/actions/documents";
 
 const inputClass = "mt-1.5 h-10 w-full rounded-md border border-[#394039] bg-[#151815] px-3 text-sm text-[#f0f2ed] focus:border-[#a8bd64] focus:outline-none";
 
@@ -21,14 +21,10 @@ export function DocumentUploadForm({ bikeId, today }: { bikeId: string; today: s
 }
 
 export function DocumentControls({ id }: { id: string }) {
-  const [downloadState, downloadAction, downloading] = useActionState<DocumentActionState, FormData>(getDocumentUrlAction, {});
   const [deleteState, deleteAction, deleting] = useActionState<DocumentActionState, FormData>(deleteDocumentAction, {});
-  useEffect(() => {
-    if (downloadState.url) window.open(downloadState.url, "_blank", "noopener,noreferrer");
-  }, [downloadState.url]);
 
   return <div className="flex flex-wrap items-center gap-2">
-    <form action={downloadAction}><input type="hidden" name="id" value={id} /><button disabled={downloading} className="h-8 rounded-md border border-[#46513a] px-3 text-[11px] font-medium text-[#d8fa56] disabled:opacity-60">{downloading ? "Opening…" : "Download"}</button></form>
+    <a href={`/api/documents/${id}/download`} target="_blank" rel="noopener noreferrer" className="inline-flex h-8 items-center rounded-md border border-[#46513a] px-3 text-[11px] font-medium text-[#d8fa56]">Download</a>
     <form action={deleteAction} onSubmit={(event) => { if (!window.confirm("Delete this private document? This cannot be undone.")) event.preventDefault(); }}><input type="hidden" name="id" value={id} /><button disabled={deleting} className="h-8 rounded-md border border-[#523733] px-3 text-[11px] text-[#ff958b] disabled:opacity-60">{deleting ? "Deleting…" : "Delete"}</button></form>
     {deleteState.error && <p role="alert" className="w-full text-[10px] text-[#ff958b]">{deleteState.error}</p>}
     {deleteState.success && <p role="status" className="w-full text-[10px] text-[#d8fa56]">{deleteState.success}</p>}

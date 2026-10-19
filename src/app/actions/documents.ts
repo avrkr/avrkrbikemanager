@@ -73,18 +73,6 @@ export async function uploadDocumentAction(_previous: DocumentActionState, formD
   return { success: "Document uploaded to your private storage." };
 }
 
-export async function getDocumentUrlAction(_previous: DocumentActionState, formData: FormData): Promise<DocumentActionState> {
-  const id = z.string().uuid().safeParse(formData.get("id"));
-  if (!id.success) return { error: "Invalid document." };
-  const auth = await getUserClient();
-  if ("error" in auth) return auth;
-  const { data: document } = await auth.supabase.from("documents").select("storage_path").eq("id", id.data).eq("owner_id", auth.user.id).maybeSingle();
-  if (!document) return { error: "Document not found." };
-  const { data, error } = await auth.supabase.storage.from(bucket).createSignedUrl(document.storage_path, 60, { download: true });
-  if (error || !data?.signedUrl) return { error: "Unable to create a private download link." };
-  return { url: data.signedUrl };
-}
-
 export async function deleteDocumentAction(_previous: DocumentActionState, formData: FormData): Promise<DocumentActionState> {
   const id = z.string().uuid().safeParse(formData.get("id"));
   if (!id.success) return { error: "Invalid document." };
@@ -99,4 +87,29 @@ export async function deleteDocumentAction(_previous: DocumentActionState, formD
   revalidatePath("/documents");
   revalidatePath("/notifications");
   return { success: "Document deleted." };
+}
+
+export async function uploadBikePhotoAction(_previous: DocumentActionState, formData: FormData): Promise<DocumentActionState> {
+  const bikeId = z.string().uuid().safeParse(formData.get("bikeId"));
+  const file = formData.get("file");
+  if (!bikeId.success || !(file instanceof File) || !file.size) return { error: "Choose a photo to upload." };
+  if (file.size > 10 * 1024 * 1024) return { error: "Bike photos must be 10 MB or smaller." };
+  if (!new Set(["image/jpeg", "image/png", "image/webp"]).has(file.type)) return { error: "Use a JPEG, PNG, or WebP photo." };
+  const auth = await getUserClient();
+  if ("error" in auth) return auth;
+  const { data: bike } = await auth.supabase.from("bikes").select("id,photo_path").eq("id", bikeId.data).eq("owner_id", auth.user.id).maybeSingle();
+  if (!bike) return { error: "Bike not found." };
+  const extension = file.type === "image/jpeg" ? "jpg" : file.type === "image/png" ? "png" : "webp";
+  const photoPath = `${auth.user.id}/${bike.id}/bike-photo-${randomUUID()}.${extension}`;
+  const { error: uploadError } = await auth.supabase.storage.from(bucket).upload(photoPath, file, { contentType: file.type, upsert: false });
+  if (uploadError) return { error: "Photo upload failed. Confirm the private storage bucket is configured." };
+  const { error: updateError } = await auth.supabase.from("bikes").update({ photo_path: photoPath }).eq("id", bike.id).eq("owner_id", auth.user.id);
+  if (updateError) {
+    await auth.supabase.storage.from(bucket).remove([photoPath]);
+    return { error: "The photo uploaded, but the bike profile could not be updated." };
+  }
+  if (bike.photo_path) await auth.supabase.storage.from(bucket).remove([bike.photo_path]);
+  revalidatePath("/profile");
+  revalidatePath("/");
+  return { success: "Bike photo updated." };
 }
