@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { ArrowUpRight, CalendarClock, CirclePlus, Gauge, Wrench } from "lucide-react";
 import { AppShell, SectionHeading } from "@/components/app-shell";
 import { MaintenanceForm } from "@/components/maintenance-form";
+import { MaintenanceTaskControls } from "@/components/maintenance-task-controls";
 import { TaskNotificationForm } from "@/components/notification-settings-form";
 import { hasSupabaseConfiguration } from "@/lib/env";
 import { getMaintenanceStatus } from "@/lib/maintenance";
@@ -49,6 +50,7 @@ async function MaintenanceContent() {
                 {task.next_due_odometer !== null && <span className="inline-flex items-center gap-1.5"><Gauge size={13} /> {Number(task.next_due_odometer).toLocaleString("en-IN")} km</span>}
                 {task.estimated_cost !== null && <span>Est. ₹{Number(task.estimated_cost).toLocaleString("en-IN")}</span>}
               </div>
+              <div className="sm:col-span-2"><MaintenanceTaskControls task={task} /></div>
               <div className="sm:col-span-2"><TaskNotificationForm taskId={task.id} settings={preferences?.find((item) => item.task_id === task.id)} /></div>
             </article>;
           })}

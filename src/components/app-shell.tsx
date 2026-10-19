@@ -156,11 +156,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Link href="/notifications" aria-label="Notifications" title="Notifications" className="relative grid size-10 place-items-center rounded-md border border-[#303630] text-[#b6bcb4] hover:bg-white/[0.04]">
               <Bell size={17} />
             </Link>
-            <button type="button" className="flex h-10 items-center gap-2 rounded-md border border-[#303630] px-2.5 text-sm hover:bg-white/[0.04]" aria-label="Garage menu">
+            <Link href="/profile" className="flex h-10 items-center gap-2 rounded-md border border-[#303630] px-2.5 text-sm hover:bg-white/[0.04]" aria-label="Open bike profile">
               <span className="grid size-6 place-items-center rounded-sm bg-[#d8fa56]/15 text-[#d8fa56]"><Bike size={14} /></span>
               <span className="hidden text-xs text-[#c7ccc5] sm:inline">My garage</span>
               <ChevronDown size={14} className="text-[#929990]" />
-            </button>
+            </Link>
           </div>
         </header>
 
